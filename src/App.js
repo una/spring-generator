@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 
 // A simplified spring physics implementation based on the principles used by libraries like Motion.
 const springSimulation = (config) => {
-    let { stiffness, damping, mass, initialVelocity, restSpeed, restDelta } = {
+    let { stiffness, damping, mass, velocity } = {
         stiffness: 100,
         damping: 10,
         mass: 1,
-        initialVelocity: 0,
-        restSpeed: 0.001,
-        restDelta: 0.001,
+        velocity: 0,
         ...config
     };
+    const restSpeed = 0.001;
+    const restDelta = 0.001;
 
     let position = 0;
-    let velocity = initialVelocity;
     const endPosition = 1;
     const points = [];
     const step = 1 / 60; // 60 FPS simulation
@@ -94,17 +94,47 @@ const AnimationPreview = ({ cssLinearFunction, animationKey, duration }) => {
     };
 
     return (
+        <div>
+            <div className="w-full bg-gray-100 p-8 rounded-lg border border-gray-200">
+                <style>
+                    {`
+                        @keyframes moveRight {
+                            from { transform: translateX(0%); }
+                            to { transform: translateX(90%); }
+                        }
+                    `}
+                </style>
+                <div key={animationKey} style={style} className="w-12 h-12 bg-blue-500 rounded-full"></div>
+            </div>
+            <code className="text-sm text-gray-500 mt-2 block text-center">
+          CSS linear()
+        </code>
+    </div>
+    );
+};
+
+const MotionAnimationPreview = ({ stiffness, damping, mass, velocity, animationKey }) => {
+    return (
+        <div className="">
         <div className="w-full bg-gray-100 p-8 rounded-lg border border-gray-200">
-             <style>
-                {`
-                    @keyframes moveRight {
-                        from { transform: translateX(0%); }
-                        to { transform: translateX(90%); }
-                    }
-                `}
-            </style>
-            <div key={animationKey} style={style} className="w-12 h-12 bg-blue-500 rounded-full"></div>
+            <motion.div
+                key={animationKey}
+                className="w-12 h-12 bg-purple-500 rounded-full"
+                initial={{ x: 0 }}
+                animate={{ x: '90%' }}
+                transition={{
+                    type: 'spring',
+                    stiffness,
+                    damping,
+                    mass,
+                    velocity,
+                }}
+            />
         </div>
+        <code className="text-sm text-gray-500 mt-2 block text-center">
+          &lt;motion.div /&gt;
+        </code>
+    </div>
     );
 };
 
@@ -114,7 +144,7 @@ function App() {
     const [damping, setDamping] = useState(10);
     const [mass, setMass] = useState(1);
     const [velocity, setVelocity] = useState(0);
-    const [duration, setDuration] = useState(2);
+    const [duration] = useState(2);
     const [cssLinearFunction, setCssLinearFunction] = useState('');
     const [animationKey, setAnimationKey] = useState(0);
     const outputRef = useRef(null);
@@ -123,12 +153,11 @@ function App() {
         stiffness: "Stiffness of the spring. Higher values will create more sudden movement.",
         damping: "Strength of opposing force. If set to 0, the spring will oscillate indefinitely.",
         mass: "Mass of the moving object. Higher values will result in more lethargic movement.",
-        velocity: "The initial velocity of the spring.",
-        duration: "The duration of the preview animation in seconds."
+        velocity: "The initial velocity of the spring."
     };
 
     useEffect(() => {
-        const points = springSimulation({ stiffness, damping, mass, initialVelocity: velocity });
+        const points = springSimulation({ stiffness, damping, mass, velocity });
         const linearString = `linear(${points.join(', ')})`;
         setCssLinearFunction(linearString);
         setAnimationKey(prev => prev + 1); // Re-trigger animation
@@ -174,8 +203,7 @@ function App() {
                         <Slider label="Stiffness" value={stiffness} min="1" max="500" onChange={setStiffness} description={descriptions.stiffness} />
                         <Slider label="Damping" value={damping} min="1" max="100" onChange={setDamping} description={descriptions.damping} />
                         <Slider label="Mass" value={mass} min="0.1" max="10" step="0.1" onChange={setMass} description={descriptions.mass} />
-                        <Slider label="Initial Velocity" value={velocity} min="-20" max="20" step="0.5" onChange={setVelocity} description={descriptions.velocity} />
-                        <Slider label="Duration" value={duration} min="0.5" max="5" step="0.1" onChange={setDuration} unit="s" description={descriptions.duration} />
+                        <Slider label="Velocity" value={velocity} min="-20" max="20" step="0.5" onChange={setVelocity} description={descriptions.velocity} />
                     </div>
 
                     {/* Right Column: Output & Preview */}
@@ -190,7 +218,10 @@ function App() {
                                     Replay
                                 </button>
                             </div>
-                            <AnimationPreview cssLinearFunction={cssLinearFunction} animationKey={animationKey} duration={duration} />
+                            <div className="grid grid-cols-2 gap-4">
+                                <AnimationPreview cssLinearFunction={cssLinearFunction} animationKey={animationKey} duration={duration} />
+                                <MotionAnimationPreview stiffness={stiffness} damping={damping} mass={mass} velocity={velocity} animationKey={animationKey} />
+                            </div>
                         </div>
                         <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
                              <div className="flex justify-between items-center mb-3">
