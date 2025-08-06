@@ -139,6 +139,43 @@ const MotionAnimationPreview = ({ stiffness, damping, mass, velocity, animationK
 };
 
 
+const Tabs = ({ activeTab, onTabClick }) => (
+    <div className="flex border-b border-gray-200">
+        <button
+            className={`px-4 py-2 text-sm font-medium ${activeTab === 'css' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}
+            onClick={() => onTabClick('css')}
+        >
+            CSS
+        </button>
+        <button
+            className={`px-4 py-2 text-sm font-medium ${activeTab === 'react' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}
+            onClick={() => onTabClick('react')}
+        >
+            React Motion
+        </button>
+    </div>
+);
+
+const ReactMotionOutput = ({ stiffness, damping, mass, velocity }) => {
+    const code = `
+<motion.div
+  animate={{ x: 100 }}
+  transition={{
+    type: 'spring',
+    stiffness: ${stiffness},
+    damping: ${damping},
+    mass: ${mass},
+    velocity: ${velocity}
+  }}
+/>`;
+    return (
+        <pre className="w-full h-32 p-3 font-mono text-sm bg-gray-100 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 overflow-auto">
+            <code>{code.trim()}</code>
+        </pre>
+    );
+};
+
+
 function App() {
     const [stiffness, setStiffness] = useState(100);
     const [damping, setDamping] = useState(10);
@@ -147,6 +184,7 @@ function App() {
     const [duration] = useState(2);
     const [cssLinearFunction, setCssLinearFunction] = useState('');
     const [animationKey, setAnimationKey] = useState(0);
+    const [activeTab, setActiveTab] = useState('css');
     const outputRef = useRef(null);
 
     const descriptions = {
@@ -168,24 +206,35 @@ function App() {
     };
 
     const copyToClipboard = () => {
-        if (outputRef.current) {
-            outputRef.current.select();
-            try {
-                // Use document.execCommand as a fallback for iFrame environments
-                document.execCommand('copy');
-                // A simple confirmation UI instead of alert()
-                const copyButton = document.querySelector('#copy-button');
-                if(copyButton) {
-                    const originalText = copyButton.textContent;
-                    copyButton.textContent = 'Copied!';
-                    setTimeout(() => {
-                        copyButton.textContent = originalText;
-                    }, 2000);
-                }
-            } catch (err) {
-                console.error('Failed to copy text: ', err);
-            }
+        let textToCopy = '';
+        if (activeTab === 'css') {
+            textToCopy = `animation-timing-function: ${cssLinearFunction};`;
+        } else {
+            textToCopy = `
+<motion.div
+  animate={{ x: 100 }}
+  transition={{
+    type: 'spring',
+    stiffness: ${stiffness},
+    damping: ${damping},
+    mass: ${mass},
+    velocity: ${velocity}
+  }}
+/>`;
         }
+
+        navigator.clipboard.writeText(textToCopy.trim()).then(() => {
+            const copyButton = document.querySelector('#copy-button');
+            if (copyButton) {
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyButton.textContent = originalText;
+                }, 2000);
+            }
+        }).catch(err => {
+            console.error('Failed to copy text: ', err);
+        });
     };
 
     return (
@@ -193,7 +242,7 @@ function App() {
             <div className="w-full max-w-4xl mx-auto">
                 <header className="text-center mb-8">
                     <h1 className="text-4xl font-bold text-gray-800">Spring to CSS `linear()` Generator</h1>
-                    <p className="text-gray-600 mt-2">Use <a href="https://motion.dev/docs/spring">Motion</a>-style spring physics to generate a CSS easing function.</p>
+                    <p className="text-gray-600 mt-2">Use <a href="https://motion.dev/docs/spring">Motion</a>-style spring physics to generate an approximated CSS easing function.</p>
                 </header>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -224,8 +273,8 @@ function App() {
                             </div>
                         </div>
                         <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                             <div className="flex justify-between items-center mb-3">
-                                <h2 className="text-xl font-semibold text-gray-800">CSS Output</h2>
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-xl font-semibold text-gray-800">Code Output</h2>
                                 <button
                                     id="copy-button"
                                     onClick={copyToClipboard}
@@ -234,12 +283,24 @@ function App() {
                                     Copy
                                 </button>
                             </div>
-                            <textarea
-                                ref={outputRef}
-                                readOnly
-                                value={`animation-timing-function: ${cssLinearFunction};`}
-                                className="w-full h-32 p-3 font-mono text-sm bg-gray-100 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
+                            <Tabs activeTab={activeTab} onTabClick={setActiveTab} />
+                            <div className="mt-4">
+                                {activeTab === 'css' ? (
+                                    <textarea
+                                        ref={outputRef}
+                                        readOnly
+                                        value={`animation-timing-function: ${cssLinearFunction};`}
+                                        className="w-full h-32 p-3 font-mono text-sm bg-gray-100 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                ) : (
+                                    <ReactMotionOutput
+                                        stiffness={stiffness}
+                                        damping={damping}
+                                        mass={mass}
+                                        velocity={velocity}
+                                    />
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
