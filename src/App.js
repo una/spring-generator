@@ -115,7 +115,7 @@ const AnimationPreview = ({ cssLinearFunction, animationKey, duration }) => {
 
 const MotionAnimationPreview = ({ stiffness, damping, mass, velocity, animationKey }) => {
     return (
-        <div className="">
+        <div>
         <div className="w-full bg-gray-100 p-8 rounded-lg border border-gray-200">
             <motion.div
                 key={animationKey}
