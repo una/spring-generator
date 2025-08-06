@@ -1,52 +1,360 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
-// A simplified spring physics implementation based on the principles used by libraries like Motion.
-const springSimulation = (config) => {
-    let { stiffness, damping, mass, velocity } = {
-        stiffness: 100,
-        damping: 10,
-        mass: 1,
-        velocity: 0,
-        ...config
+const clamp = (min, max, v) => Math.min(Math.max(v, min), max);
+const millisecondsToSeconds = (ms) => ms / 1000;
+const secondsToMilliseconds = (s) => s * 1000;
+
+const springDefaults = {
+    stiffness: 100,
+    damping: 10,
+    mass: 1.0,
+    velocity: 0.0,
+    duration: 800,
+    bounce: 0.3,
+    visualDuration: 0.3,
+    restSpeed: {
+        granular: 0.01,
+        default: 2,
+    },
+    restDelta: {
+        granular: 0.005,
+        default: 0.5,
+    },
+    minDuration: 0.01,
+    maxDuration: 10.0,
+    minDamping: 0.05,
+    maxDamping: 1,
+};
+
+const durationKeys = ["duration", "bounce"];
+const physicsKeys = ["stiffness", "damping", "mass"];
+
+function isSpringType(options, keys) {
+    return keys.some((key) => options[key] !== undefined);
+}
+
+function getSpringOptions(options) {
+    let springOptions = {
+        velocity: springDefaults.velocity,
+        stiffness: springDefaults.stiffness,
+        damping: springDefaults.damping,
+        mass: springDefaults.mass,
+        isResolvedFromDuration: false,
+        ...options,
     };
-    const restSpeed = 0.001;
-    const restDelta = 0.001;
 
-    let position = 0;
-    const endPosition = 1;
-    const points = [];
-    const step = 1 / 60; // 60 FPS simulation
+    if (
+        !isSpringType(options, physicsKeys) &&
+        isSpringType(options, durationKeys)
+    ) {
+        if (options.visualDuration) {
+            const visualDuration = options.visualDuration;
+            const root = (2 * Math.PI) / (visualDuration * 1.2);
+            const stiffness = root * root;
+            const damping =
+                2 *
+                clamp(0.05, 1, 1 - (options.bounce || 0)) *
+                Math.sqrt(stiffness);
 
-    let isAtRest = false;
-    let frameCount = 0;
-    const maxFrames = 1000; // Prevent infinite loops
+            springOptions = {
+                ...springOptions,
+                mass: springDefaults.mass,
+                stiffness,
+                damping,
+            };
+        } else {
+            const derived = findSpring(options);
 
-    while (!isAtRest && frameCount < maxFrames) {
-        const springForce = -stiffness * (position - endPosition);
-        const dampingForce = -damping * velocity;
-        const acceleration = (springForce + dampingForce) / mass;
-
-        velocity += acceleration * step;
-        position += velocity * step;
-
-        points.push(parseFloat(position.toFixed(4)));
-
-        const isMoving = Math.abs(velocity) > restSpeed;
-        const isSettled = Math.abs(endPosition - position) < restDelta;
-
-        if (!isMoving && isSettled) {
-            isAtRest = true;
-            // Ensure the final value is exactly the end position
-            if (points[points.length - 1] !== endPosition) {
-                 points.push(endPosition);
-            }
+            springOptions = {
+                ...springOptions,
+                ...derived,
+                mass: springDefaults.mass,
+            };
+            springOptions.isResolvedFromDuration = true;
         }
-        frameCount++;
     }
 
+    return springOptions;
+}
+
+function spring(optionsOrVisualDuration, bounce) {
+    const options =
+        typeof optionsOrVisualDuration !== "object"
+            ? {
+                  visualDuration: optionsOrVisualDuration,
+                  keyframes: [0, 1],
+                  bounce,
+              }
+            : optionsOrVisualDuration;
+
+    let { restSpeed, restDelta } = options;
+
+    const origin = options.keyframes[0];
+    const target = options.keyframes[options.keyframes.length - 1];
+
+    const state = { done: false, value: origin };
+
+    const {
+        stiffness,
+        damping,
+        mass,
+        duration,
+        velocity,
+        isResolvedFromDuration,
+    } = getSpringOptions({
+        ...options,
+        velocity: -millisecondsToSeconds(options.velocity || 0),
+    });
+
+    const initialVelocity = velocity || 0.0;
+    const dampingRatio = damping / (2 * Math.sqrt(stiffness * mass));
+
+    const initialDelta = target - origin;
+    const undampedAngularFreq = millisecondsToSeconds(
+        Math.sqrt(stiffness / mass)
+    );
+
+    const isGranularScale = Math.abs(initialDelta) < 5;
+    restSpeed ||= isGranularScale
+        ? springDefaults.restSpeed.granular
+        : springDefaults.restSpeed.default;
+    restDelta ||= isGranularScale
+        ? springDefaults.restDelta.granular
+        : springDefaults.restDelta.default;
+
+    let resolveSpring;
+    if (dampingRatio < 1) {
+        const angularFreq = calcAngularFreq(undampedAngularFreq, dampingRatio);
+
+        resolveSpring = (t) => {
+            const envelope = Math.exp(-dampingRatio * undampedAngularFreq * t);
+
+            return (
+                target -
+                envelope *
+                    (((initialVelocity +
+                        dampingRatio * undampedAngularFreq * initialDelta) /
+                        angularFreq) *
+                        Math.sin(angularFreq * t) +
+                        initialDelta * Math.cos(angularFreq * t))
+            );
+        };
+    } else if (dampingRatio === 1) {
+        resolveSpring = (t) =>
+            target -
+            Math.exp(-undampedAngularFreq * t) *
+                (initialDelta +
+                    (initialVelocity + undampedAngularFreq * initialDelta) * t);
+    } else {
+        const dampedAngularFreq =
+            undampedAngularFreq * Math.sqrt(dampingRatio * dampingRatio - 1);
+
+        resolveSpring = (t) => {
+            const envelope = Math.exp(-dampingRatio * undampedAngularFreq * t);
+            const freqForT = Math.min(dampedAngularFreq * t, 300);
+
+            return (
+                target -
+                (envelope *
+                    ((initialVelocity +
+                        dampingRatio * undampedAngularFreq * initialDelta) *
+                        Math.sinh(freqForT) +
+                        dampedAngularFreq *
+                            initialDelta *
+                            Math.cosh(freqForT))) /
+                    dampedAngularFreq
+            );
+        };
+    }
+
+    const generator = {
+        calculatedDuration: isResolvedFromDuration ? duration || null : null,
+        next: (t) => {
+            const current = resolveSpring(t);
+
+            if (!isResolvedFromDuration) {
+                let currentVelocity = t === 0 ? initialVelocity : 0.0;
+
+                if (dampingRatio < 1) {
+                    currentVelocity =
+                        t === 0
+                            ? secondsToMilliseconds(initialVelocity)
+                            : calcGeneratorVelocity(resolveSpring, t, current);
+                }
+
+                const isBelowVelocityThreshold =
+                    Math.abs(currentVelocity) <= restSpeed;
+                const isBelowDisplacementThreshold =
+                    Math.abs(target - current) <= restDelta;
+
+                state.done =
+                    isBelowVelocityThreshold && isBelowDisplacementThreshold;
+            } else {
+                state.done = t >= duration;
+            }
+
+            state.value = state.done ? target : current;
+
+            return state;
+        },
+        toString: () => {
+            const calculatedDuration = Math.min(
+                calcGeneratorDuration(generator),
+                maxGeneratorDuration
+            );
+
+            const easing = generateLinearEasing(
+                (progress) =>
+                    generator.next(calculatedDuration * progress).value,
+                calculatedDuration,
+                30
+            );
+
+            return `linear(${easing.join(", ")})`;
+        },
+    };
+
+    return generator;
+}
+
+const safeMin = 0.001;
+
+function findSpring({
+    duration = springDefaults.duration,
+    bounce = springDefaults.bounce,
+    velocity = springDefaults.velocity,
+    mass = springDefaults.mass,
+}) {
+    let envelope;
+    let derivative;
+
+    let dampingRatio = 1 - bounce;
+
+    dampingRatio = clamp(
+        springDefaults.minDamping,
+        springDefaults.maxDamping,
+        dampingRatio
+    );
+
+    duration = clamp(
+        springDefaults.minDuration,
+        springDefaults.maxDuration,
+        millisecondsToSeconds(duration)
+    );
+
+    if (dampingRatio < 1) {
+        envelope = (undampedFreq) => {
+            const exponentialDecay = undampedFreq * dampingRatio;
+            const delta = exponentialDecay * duration;
+            const a = exponentialDecay - velocity;
+            const b = calcAngularFreq(undampedFreq, dampingRatio);
+            const c = Math.exp(-delta);
+            return safeMin - (a / b) * c;
+        };
+
+        derivative = (undampedFreq) => {
+            const exponentialDecay = undampedFreq * dampingRatio;
+            const delta = exponentialDecay * duration;
+            const d = delta * velocity + velocity;
+            const e =
+                Math.pow(dampingRatio, 2) * Math.pow(undampedFreq, 2) * duration;
+            const f = Math.exp(-delta);
+            const g = calcAngularFreq(Math.pow(undampedFreq, 2), dampingRatio);
+            const factor = -envelope(undampedFreq) + safeMin > 0 ? -1 : 1;
+            return (factor * ((d - e) * f)) / g;
+        };
+    } else {
+        envelope = (undampedFreq) => {
+            const a = Math.exp(-undampedFreq * duration);
+            const b = (undampedFreq - velocity) * duration + 1;
+            return -safeMin + a * b;
+        };
+
+        derivative = (undampedFreq) => {
+            const a = Math.exp(-undampedFreq * duration);
+            const b = (velocity - undampedFreq) * (duration * duration);
+            return a * b;
+        };
+    }
+
+    const initialGuess = 5 / duration;
+    const undampedFreq = approximateRoot(envelope, derivative, initialGuess);
+
+    duration = secondsToMilliseconds(duration);
+
+    if (isNaN(undampedFreq)) {
+        return {
+            stiffness: springDefaults.stiffness,
+            damping: springDefaults.damping,
+            duration,
+        };
+    } else {
+        const stiffness = Math.pow(undampedFreq, 2) * mass;
+        return {
+            stiffness,
+            damping: dampingRatio * 2 * Math.sqrt(mass * stiffness),
+            duration,
+        };
+    }
+}
+
+const rootIterations = 12;
+
+function approximateRoot(envelope, derivative, initialGuess) {
+    let result = initialGuess;
+    for (let i = 1; i < rootIterations; i++) {
+        result = result - envelope(result) / derivative(result);
+    }
+    return result;
+}
+
+function calcAngularFreq(undampedFreq, dampingRatio) {
+    return undampedFreq * Math.sqrt(1 - dampingRatio * dampingRatio);
+}
+
+function calcGeneratorVelocity(resolve, t, current) {
+    const prevT = Math.max(t - 5, 0);
+    return (current - resolve(prevT)) / (t - prevT);
+}
+
+const springSimulation = (config) => {
+    const generator = spring({ keyframes: [0, 1], ...config });
+    const points = [];
+    let t = 0;
+    const step = 16.666;
+    while (true) {
+        const { value, done } = generator.next(t);
+        points.push(value);
+        if (done) {
+            break;
+        }
+        t += step;
+    }
     return points;
 };
+
+const maxGeneratorDuration = 10000;
+
+function calcGeneratorDuration(generator) {
+    let t = 0;
+    const step = 50;
+    while (t < maxGeneratorDuration) {
+        if (generator.next(t).done) {
+            break;
+        }
+        t += step;
+    }
+    return t;
+}
+
+function generateLinearEasing(generator, duration, resolution = 30) {
+    const points = [];
+    for (let i = 0; i < resolution; i++) {
+        points.push(generator(i / (resolution - 1)));
+    }
+    return points;
+}
 
 
 // --- React Components ---
@@ -157,9 +465,8 @@ function App() {
     };
 
     useEffect(() => {
-        const points = springSimulation({ stiffness, damping, mass, velocity });
-        const linearString = `linear(${points.join(', ')})`;
-        setCssLinearFunction(linearString);
+        const generator = spring({ keyframes: [0, 1], stiffness, damping, mass, velocity });
+        setCssLinearFunction(generator.toString());
         setAnimationKey(prev => prev + 1); // Re-trigger animation
     }, [stiffness, damping, mass, velocity]);
 
